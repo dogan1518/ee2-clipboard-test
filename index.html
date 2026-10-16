@@ -24,7 +24,7 @@
 </style>
 </head>
 <body>
-<h1>Pano Test (Steam overlay)</h1>
+<h1>Pano Test (Steam overlay) v2</h1>
 
 <div class="card">
   <h2>Ortam</h2>
@@ -50,6 +50,24 @@
 </div>
 
 <div class="card">
+  <h2>Test D: clipboard.read() (readText'ten farklı yol)</h2>
+  <div class="row"><button id="btnD">Panoyu read() ile oku</button></div>
+  <div id="d-res">Henüz denenmedi.</div>
+</div>
+
+<div class="card">
+  <h2>Test E: execCommand('paste')</h2>
+  <textarea id="boxE" placeholder="(düğme buraya yapıştırmayı dener)"></textarea>
+  <div class="row"><button id="btnE">execCommand ile yapıştır</button></div>
+  <div id="e-res">Henüz denenmedi.</div>
+</div>
+
+<div class="card">
+  <h2>Test F: pano değişince olay (clipboardchange)</h2>
+  <div id="f-res">Dinleniyor. Oyunda Ctrl+Alt+C yapınca bir şey yazmalı (yazmazsa bu tarayıcı desteklemiyor).</div>
+</div>
+
+<div class="card">
   <h2>Sonuç</h2>
   <div id="verdict">Test sonucu bekleniyor.</div>
 </div>
@@ -64,7 +82,7 @@
   const $ = (id) => document.getElementById(id);
   const logEl = $('log');
   const t0 = performance.now();
-  const results = { A: null, B: null, C: null };
+  const results = { A: null, B: null, C: null, D: null, E: null, F: null };
   function log(msg) {
     const s = ((performance.now() - t0) / 1000).toFixed(1).padStart(6);
     logEl.textContent += `[${s}s] ${msg}\n`;
@@ -77,6 +95,9 @@
     if (results.A) v.push('A: Ctrl+V ile yapıştırma çalışıyor');
     if (results.B) v.push('B: düğmeyle okuma çalışıyor');
     if (results.C) v.push('C: OTOMATİK okuma çalışıyor');
+    if (results.D) v.push('D: read() çalışıyor');
+    if (results.E) v.push('E: execCommand çalışıyor');
+    if (results.F) v.push('F: clipboardchange olayı çalışıyor');
     $('verdict').textContent = v.length ? v.join(' | ') : 'Henüz çalışan yöntem yok.';
   }
 
@@ -87,7 +108,8 @@
     ['readText var', String(!!(navigator.clipboard && navigator.clipboard.readText))],
     ['Odakta', String(document.hasFocus())],
     ['Görünürlük', document.visibilityState],
-    ['Tarayıcı', navigator.userAgent.replace(/\s+/g, ' ').slice(0, 90)],
+    ['Chromium sürümü', (navigator.userAgent.match(/Chrome\/(\S+)/) || [,'?'])[1]],
+    ['Tarayıcı', navigator.userAgent.replace(/\s+/g, ' ')],
   ];
   const envEl = $('env');
   function renderEnv() { envEl.innerHTML = env.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join(''); }
@@ -150,6 +172,42 @@
       lastFocus = f;
     }, 500);
   });
+
+
+  // Test D
+  $('btnD').addEventListener('click', async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      let text = '';
+      for (const it of items) for (const type of it.types) if (type === 'text/plain') text += await (await it.getType(type)).text();
+      results.D = text.length > 0;
+      setRes($('d-res'), results.D, text ? preview(text) : 'pano boş (türler: ' + items.map(i => i.types.join(',')).join(' | ') + ')');
+      log('D read(): ' + (text ? preview(text) : 'boş'));
+    } catch (e) { setRes($('d-res'), false, e.name + ': ' + e.message); log('D read(): ' + e.name + ': ' + e.message); }
+    verdict();
+  });
+  // Test E
+  $('btnE').addEventListener('click', () => {
+    const ta = $('boxE'); ta.value = ''; ta.focus();
+    let ok = false, err = '';
+    try { ok = document.execCommand('paste'); } catch (e) { err = e.name; }
+    const v = ta.value;
+    results.E = ok && v.length > 0;
+    setRes($('e-res'), results.E, `execCommand sonucu=${ok}${err ? ' hata=' + err : ''}, ${v ? preview(v) : 'metin gelmedi'}`);
+    log('E execCommand: ' + ok + ' ' + (v ? preview(v) : 'boş'));
+    verdict();
+  });
+  // Test F
+  let fcount = 0;
+  const fh = async (e) => {
+    fcount++;
+    $('f-res').innerHTML = `<span class="ok">OLAY GELDİ</span> (${fcount}. kez) tür=${e.type}`;
+    log('F clipboardchange olayı geldi (' + fcount + ')');
+    results.F = true; verdict();
+  };
+  try { navigator.clipboard.addEventListener('clipboardchange', fh); } catch (e) {}
+  try { window.addEventListener('clipboardchange', fh); } catch (e) {}
+  $('f-res').textContent += ' [destek: ' + ('onclipboardchange' in window) + ']';
 
   window.addEventListener('focus', () => log('pencere ODAK aldı'));
   window.addEventListener('blur', () => log('pencere ODAK kaybetti'));
