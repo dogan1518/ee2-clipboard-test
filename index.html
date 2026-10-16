@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pano Test</title>
+<style>
+  :root { --bg:#14161a; --fg:#e8e6e1; --mut:#9a9a94; --ok:#4cc38a; --bad:#ef6b6b; --card:#1d2026; --line:#2c3038; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f5f1; --fg:#1b1b19; --mut:#6b6b64; --ok:#1d8a57; --bad:#c23b3b; --card:#fff; --line:#dedcd4; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; padding:12px; }
+  h1 { font-size:16px; margin:0 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:10px; }
+  .card h2 { font-size:13px; margin:0 0 6px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  textarea { width:100%; height:64px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; }
+  button { background:var(--fg); color:var(--bg); border:0; border-radius:6px; padding:7px 12px; font:inherit; font-weight:600; cursor:pointer; }
+  button.alt { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; }
+  .kv b { color:var(--mut); font-weight:500; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #log { font:12px/1.4 ui-monospace,Menlo,monospace; max-height:220px; overflow:auto; white-space:pre-wrap; }
+  #verdict { font-weight:700; }
+</style>
+</head>
+<body>
+<h1>Pano Test (Steam overlay)</h1>
+
+<div class="card">
+  <h2>Ortam</h2>
+  <div class="kv" id="env"></div>
+</div>
+
+<div class="card">
+  <h2>Test A: Ctrl+V ile yapıştır (izin gerektirmez)</h2>
+  <textarea id="box" placeholder="Buraya tıkla ve Ctrl+V yap" autofocus></textarea>
+  <div id="a-res" class="mut">Henüz yapıştırma olmadı.</div>
+</div>
+
+<div class="card">
+  <h2>Test B: Düğmeyle okuma (readText)</h2>
+  <div class="row"><button id="btn">Panoyu oku</button></div>
+  <div id="b-res">Henüz denenmedi.</div>
+</div>
+
+<div class="card">
+  <h2>Test C: Otomatik okuma (düğmesiz)</h2>
+  <div class="row"><button class="alt" id="auto">Otomatik okumayı başlat/durdur</button></div>
+  <div id="c-res">Kapalı. Başlatınca overlay açıkken ve kapalıyken her 500 ms denenir.</div>
+</div>
+
+<div class="card">
+  <h2>Sonuç</h2>
+  <div id="verdict">Test sonucu bekleniyor.</div>
+</div>
+
+<div class="card">
+  <h2>Kayıt</h2>
+  <div id="log"></div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+  const t0 = performance.now();
+  const results = { A: null, B: null, C: null };
+  function log(msg) {
+    const s = ((performance.now() - t0) / 1000).toFixed(1).padStart(6);
+    logEl.textContent += `[${s}s] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function preview(t) { return JSON.stringify(t.slice(0, 60)) + (t.length > 60 ? ` ... (${t.length} karakter)` : ` (${t.length} karakter)`); }
+  function setRes(el, ok, msg) { el.innerHTML = `<span class="${ok ? 'ok' : 'bad'}">${ok ? 'ÇALIŞTI' : 'OLMADI'}</span> ${msg}`; }
+  function verdict() {
+    const v = [];
+    if (results.A) v.push('A: Ctrl+V ile yapıştırma çalışıyor');
+    if (results.B) v.push('B: düğmeyle okuma çalışıyor');
+    if (results.C) v.push('C: OTOMATİK okuma çalışıyor');
+    $('verdict').textContent = v.length ? v.join(' | ') : 'Henüz çalışan yöntem yok.';
+  }
+
+  // Ortam bilgisi
+  const env = [
+    ['Güvenli bağlam (HTTPS)', String(window.isSecureContext)],
+    ['navigator.clipboard', String(!!navigator.clipboard)],
+    ['readText var', String(!!(navigator.clipboard && navigator.clipboard.readText))],
+    ['Odakta', String(document.hasFocus())],
+    ['Görünürlük', document.visibilityState],
+    ['Tarayıcı', navigator.userAgent.replace(/\s+/g, ' ').slice(0, 90)],
+  ];
+  const envEl = $('env');
+  function renderEnv() { envEl.innerHTML = env.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join(''); }
+  renderEnv();
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'clipboard-read' }).then(
+      (p) => { env.push(['clipboard-read izni', p.state]); renderEnv(); log('izin durumu: ' + p.state); p.onchange = () => log('izin değişti: ' + p.state); },
+      (e) => { env.push(['clipboard-read izni', 'sorgulanamadı: ' + e.name]); renderEnv(); }
+    );
+  } else { env.push(['clipboard-read izni', 'Permissions API yok']); renderEnv(); }
+
+  // Test A: paste olayı
+  $('box').addEventListener('paste', (e) => {
+    const t = (e.clipboardData || window.clipboardData).getData('text');
+    results.A = t.length > 0;
+    setRes($('a-res'), results.A, preview(t));
+    log('A paste olayı: ' + preview(t));
+    verdict();
+  });
+  $('box').focus();
+
+  // Test B: düğme
+  async function readOnce(tag) {
+    try {
+      const t = await navigator.clipboard.readText();
+      return { ok: true, text: t };
+    } catch (e) {
+      return { ok: false, err: e.name + ': ' + e.message };
+    }
+  }
+  $('btn').addEventListener('click', async () => {
+    const r = await readOnce('B');
+    results.B = r.ok && r.text.length > 0;
+    if (r.ok) setRes($('b-res'), results.B, preview(r.text)); else setRes($('b-res'), false, r.err);
+    log('B readText: ' + (r.ok ? preview(r.text) : r.err));
+    verdict();
+  });
+
+  // Test C: otomatik
+  let timer = null, n = 0, lastFocus = null;
+  $('auto').addEventListener('click', () => {
+    if (timer) { clearInterval(timer); timer = null; $('c-res').textContent = 'Durduruldu.'; log('C durdu'); return; }
+    n = 0;
+    $('c-res').textContent = 'Çalışıyor...';
+    log('C başladı');
+    timer = setInterval(async () => {
+      n++;
+      const f = document.hasFocus(), vis = document.visibilityState;
+      const r = await readOnce('C');
+      if (r.ok && r.text.length > 0) {
+        results.C = true;
+        setRes($('c-res'), true, `deneme ${n}, odak=${f}, görünürlük=${vis}: ${preview(r.text)}`);
+        log(`C ÇALIŞTI (deneme ${n}, odak=${f}, görünürlük=${vis}): ${preview(r.text)}`);
+        verdict();
+      } else {
+        const msg = r.ok ? 'pano boş' : r.err;
+        if (n % 4 === 1 || lastFocus !== f) log(`C deneme ${n} odak=${f} görünürlük=${vis}: ${msg}`);
+        $('c-res').innerHTML = `<span class="bad">son deneme ${n}</span> odak=${f}, görünürlük=${vis}: ${msg}`;
+      }
+      lastFocus = f;
+    }, 500);
+  });
+
+  window.addEventListener('focus', () => log('pencere ODAK aldı'));
+  window.addEventListener('blur', () => log('pencere ODAK kaybetti'));
+  document.addEventListener('visibilitychange', () => log('görünürlük: ' + document.visibilityState));
+  log('sayfa yüklendi');
+})();
+</script>
+</body>
+</html>
